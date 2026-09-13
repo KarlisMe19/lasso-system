@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Sales &amp; Cashier — LASSO Admin</title>
+<link rel="stylesheet" href="/lasso/assets/css/style.css">
+</head>
+<body>
+<div class="topbar">
+  <div class="brand">LASSO Admin<span class="dot">.</span></div>
+  <nav>
+    <a href="/lasso/admin/dashboard.html">Dashboard</a>
+    <a href="/lasso/admin/materials.html">Materials</a>
+    <a href="/lasso/admin/users.html">Users</a>
+    <a href="/lasso/admin/sales.html" class="active">Sales &amp; Cashier</a>
+    <button onclick="logout('/lasso/admin-login.html')">Logout</button>
+  </nav>
+</div>
+
+<div class="page container">
+  <h1>Cashier — Confirm Payment</h1>
+  <p class="muted">Enter the billing code presented by the student at the cashier to release their validation code.</p>
+  <div class="card">
+    <div id="cashierAlert"></div>
+    <form id="cashierForm" style="display:flex; gap:8px;">
+      <input type="text" id="billingCode" placeholder="Billing code, e.g. BS-XXXXXXXX" style="flex:1;" required>
+      <button class="btn btn-gold" type="submit">Confirm Payment</button>
+    </form>
+  </div>
+
+  <div class="card">
+    <h2>Pending Payments</h2>
+    <table>
+      <thead><tr><th>Billing Code</th><th>Student</th><th>Amount</th><th>Term</th><th>Code Status</th><th>Validation Code</th></tr></thead>
+      <tbody id="pendingBody"></tbody>
+    </table>
+  </div>
+
+  <h1 style="margin-top:30px;">Sales Report</h1>
+  <div class="card" style="display:flex; gap:10px; flex-wrap:wrap; align-items:flex-end;">
+    <div>
+      <label>Group By</label>
+      <select id="groupBy">
+        <option value="material">Instructional Material</option>
+        <option value="department">College Department</option>
+        <option value="program">College Program</option>
+        <option value="year_level">Year Level</option>
+        <option value="semester">Semestral Period</option>
+      </select>
+    </div>
+    <button class="btn btn-primary" onclick="loadReport()">Generate</button>
+  </div>
+  <div class="card">
+    <table>
+      <thead><tr><th id="labelHeader">Category</th><th>Total Subscriptions</th><th>Total Revenue</th></tr></thead>
+      <tbody id="reportBody"></tbody>
+    </table>
+  </div>
+
+  <h1 style="margin-top:30px;">Subscription Status Monitoring</h1>
+  <div class="card">
+    <table>
+      <thead><tr><th>Material</th><th>Active Subscribers</th><th>Total Ever Subscribed</th></tr></thead>
+      <tbody id="subStatusBody"></tbody>
+    </table>
+  </div>
+</div>
+
+<script src="/lasso/assets/js/api.js"></script>
+<script>
+async function init() {
+  await requireAuth('admin');
+  await loadPending();
+  await loadReport();
+  await loadSubStatus();
+}
+
+document.getElementById('cashierForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const box = document.getElementById('cashierAlert');
+  const billing_code = document.getElementById('billingCode').value.trim();
+  const r = await apiPost('/admin/confirm_payment.php', { billing_code });
+  if (r.success) {
+    box.innerHTML = `
+      <div class="alert alert-success">
+        Payment confirmed for <b>${r.student_name}</b> (${r.student_id_number}).
+      </div>
+      <div class="card" style="border:2px dashed var(--gold); text-align:center; margin-top:0;">
+        <p class="muted" style="margin:0 0 6px;">Give this validation code to the student:</p>
+        <div style="font-size:1.6rem; font-weight:800; letter-spacing:1px; color:var(--navy);">${r.validation_code}</div>
+      </div>`;
+    document.getElementById('billingCode').value = '';
+    loadPending();
+  } else {
+    box.innerHTML = `<div class="alert alert-error">${r.message}</div>`;
+  }
+});
+
+async function loadPending() {
+  const r = await apiGet('/admin/pending_billings.php');
+  const body = document.getElementById('pendingBody');
+  if (!r.success || !r.pending_billings.length) { body.innerHTML = '<tr><td colspan="6" class="muted">No pending payments.</td></tr>'; return; }
+  body.innerHTML = r.pending_billings.map(b => `
+    <tr>
+      <td>${b.billing_code}</td>
+      <td>${b.full_name} (${b.student_id_number})</td>
+      <td>${peso(b.total_amount)}</td>
+      <td>${b.semester}, AY ${b.academic_year}</td>
+      <td><span class="tag ${b.code_status === 'ready' ? 'tag-active' : 'tag-draft'}">${b.code_status}</span></td>
+      <td>${b.code ? `<b>${b.code}</b>` : '<span class="muted">Not yet released</span>'}</td>
+    </tr>`).join('');
+}
+
+async function loadReport() {
+  const groupBy = document.getElementById('groupBy').value;
+  const r = await apiGet(`/admin/sales_report.php?group_by=${groupBy}`);
+  const body = document.getElementById('reportBody');
+  document.getElementById('labelHeader').textContent = document.getElementById('groupBy').selectedOptions[0].text;
+  if (!r.success || !r.report.length) { body.innerHTML = '<tr><td colspan="3" class="muted">No data yet.</td></tr>'; return; }
+  body.innerHTML = r.report.map(row => `
+    <tr><td>${row.label ?? '—'}</td><td>${row.total_subscriptions}</td><td>${peso(row.total_revenue)}</td></tr>
+  `).join('');
+}
+
+async function loadSubStatus() {
+  const r = await apiGet('/admin/subscription_status.php');
+  const body = document.getElementById('subStatusBody');
+  if (!r.success || !r.materials.length) { body.innerHTML = '<tr><td colspan="3" class="muted">No materials yet.</td></tr>'; return; }
+  body.innerHTML = r.materials.map(m => `
+    <tr><td>${m.title}</td><td>${m.active_subscribers || 0}</td><td>${m.total_ever_subscribed || 0}</td></tr>
+  `).join('');
+}
+
+init();
+</script>
+</body>
+</html>
